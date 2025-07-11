@@ -2,12 +2,10 @@ __pycache__/
 *.pyc
 
 # 输出与日志文件
-
-
+*.txt
 # 大型数据文件
 *.zip
 *.rar
-
 # 编辑器配置
 .vscode/
 .idea/
