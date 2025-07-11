@@ -1,0 +1,209 @@
+1. content.js (第二次核心重构)
+这个文件现在将承担全部的前端UI构建和交互逻辑。它不再需要<iframe>.
+// Limit Ring v2.2 - content.js (Native UI Implementation)
+
+const STORAGE_KEY = 'limitRingState_v2';
+const STORAGE_POS_KEY = 'limitRingWindowPos_v2';
+let platformConfig = null;
+const PLATFORM_CONFIG = {
+    'gpt': {
+        platformId: 'gpt-4',
+        textareaSelector: '#prompt-textarea',
+    },
+    'gemini': {
+        platformId: 'gemini-pro',
+        textareaSelector: 'div[contenteditable="true"][role="textbox"]',
+    }
+};
+
+// --- 初始化 ---
+function initialize() {
+    if (window.location.hostname.includes('chatgpt.com')) {
+        platformConfig = PLATFORM_CONFIG['gpt'];
+    } else if (window.location.hostname.includes('gemini.google.com')) {
+        platformConfig = PLATFORM_CONFIG['gemini'];
+    } else {
+        return;
+    }
+    
+    console.log(`Limit Ring [Native Mode] 已在 ${platformConfig.platformId} 页面加载。`);
+    
+    // 等待页面加载完成再创建UI
+    const readyInterval = setInterval(() => {
+        // 使用一个更通用的元素来判断页面是否就绪
+        if (document.querySelector('main')) {
+            clearInterval(readyInterval);
+            main();
+        }
+    }, 1000);
+}
+
+// --- 主函数 ---
+function main() {
+    const container = createFloatingWindow(); // 创建UI
+    setupDrag(container, container.querySelector('#lr-header')); // 绑定拖拽
+    setupMinimize(container, container.querySelector('#lr-minimize-btn')); // 绑定最小化
+    setupTabs(container); // 绑定Tab切换
+
+    // 监听后台数据变化，实时更新UI
+    chrome.storage.onChanged.addListener((changes, namespace) => {
+        if (namespace === 'local' && changes[STORAGE_KEY]) {
+            const newState = changes[STORAGE_KEY].newValue;
+            renderAll(container, newState);
+        }
+    });
+
+    // 首次加载数据并渲染
+    chrome.storage.local.get(STORAGE_KEY, (data) => {
+        if (data[STORAGE_KEY]) {
+            renderAll(container, data[STORAGE_KEY]);
+        }
+    });
+    
+    // Pin功能监听保持不变
+    setupPinListener();
+}
+
+
+// --- UI创建函数 ---
+function createFloatingWindow() {
+    // 移除旧的，以防重复注入
+    const oldContainer = document.getElementById('lr-container');
+    if (oldContainer) oldContainer.remove();
+
+    const container = document.createElement('div');
+    container.id = 'lr-container';
+    container.innerHTML = `
+        <div id="lr-header">
+            <span class="lr-title">Limit Ring</span>
+            <button id="lr-minimize-btn">—</button>
+        </div>
+        <div id="lr-body">
+            <div class="lr-tabs">
+                <button class="lr-tab-button active" data-tab="status">状态</button>
+                <button class="lr-tab-button" data-tab="pin">Pin</button>
+            </div>
+            <div id="lr-statusContent" class="lr-tab-content active"></div>
+            <div id="lr-pinContent" class="lr-tab-content">
+                <ul id="lr-pinList"></ul>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(container);
+
+    // 加载上次的位置和状态
+    chrome.storage.local.get(STORAGE_POS_KEY, (data) => {
+        if (data[STORAGE_POS_KEY]) {
+            container.style.top = data[STORAGE_POS_KEY].top;
+            container.style.left = data[STORAGE_POS_KEY].left;
+            if (data[STORAGE_POS_KEY].minimized) {
+                container.classList.add('minimized');
+            }
+        }
+    });
+    
+    return container;
+}
+
+// --- UI渲染函数 ---
+function renderAll(container, state) {
+    if (!container || !state) return;
+    renderStatus(container.querySelector('#lr-statusContent'), state);
+    renderPins(container.querySelector('#lr-pinList'), state.pins);
+}
+
+function renderStatus(statusContainer, state) {
+    statusContainer.innerHTML = '';
+    const configs = {
+      'gpt-4': { limit: 40, window: 3 * 60, name: 'GPT-4' },
+      'gemini-pro': { limit: 100, window: 24 * 60, name: 'Gemini Pro' }
+    };
+    
+    for (const platform of ['gpt-4', 'gemini-pro']) {
+        const platformState = state[platform];
+        const platformConfig = configs[platform];
+        if (!platformState || !platformConfig) continue;
+
+        const ratio = Math.min(1, platformState.count / platformConfig.limit);
+        const timeRemaining = Math.max(0, platformState.start + platformConfig.window * 60 * 1000 - Date.now());
+        const hours = Math.floor(timeRemaining / 3600000);
+        const minutes = Math.floor((timeRemaining % 3600000) / 60000);
+
+        const cardHTML = `
+            <div class="lr-status-card">
+                <div class="lr-platform-name">${platformConfig.name}</div>
+                <div class="lr-ring-container">
+                    <div class="lr-ring-background"></div>
+                    <div class="lr-ring-progress" style="--progress: ${ratio}"></div>
+                    <div class="lr-ring-text">${platformState.count} / ${platformConfig.limit}</div>
+                </div>
+                <div class="lr-time-remaining">重置倒计时: ${hours}h ${minutes}m</div>
+            </div>`;
+        statusContainer.innerHTML += cardHTML;
+    }
+}
+
+function renderPins(pinList, pins) {
+    pinList.innerHTML = '';
+    if (!pins || pins.length === 0) {
+        pinList.innerHTML = '<li class="lr-pin-item empty">没有被钉选的信息。</li>';
+        return;
+    }
+    
+    [...pins].reverse().forEach(pin => {
+        const li = document.createElement('li');
+        li.className = 'lr-pin-item';
+        li.innerHTML = `
+            <div class="lr-pin-text">${escapeHTML(pin.text)}</div>
+            <div class="lr-pin-source">from: ${pin.source}</div>
+        `;
+        pinList.appendChild(li);
+    });
+}
+
+
+// --- UI交互函数 (拖拽, 最小化, Tab切换) ---
+function setupDrag(element, handle) { /* 与上一版逻辑相同 */ }
+function setupMinimize(element, button) { /* 与上一版逻辑相同 */ }
+
+function setupTabs(container) {
+    const tabButtons = container.querySelectorAll('.lr-tab-button');
+    const tabContents = container.querySelectorAll('.lr-tab-content');
+
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            button.classList.add('active');
+
+            const targetTab = button.dataset.tab;
+            tabContents.forEach(content => {
+                if (content.id === `lr-${targetTab}Content`) {
+                    content.classList.add('active');
+                } else {
+                    content.classList.remove('active');
+                }
+            });
+        });
+    });
+}
+
+// --- Pin功能监听 (与上一版逻辑相同) ---
+function setupPinListener() { /* 与上一版逻辑相同 */ }
+
+function escapeHTML(str) {
+    const p = document.createElement('p');
+    p.textContent = str;
+    return p.innerHTML;
+}
+
+// --- 启动 ---
+initialize();
+
+请注意： 为了让您能直接替换，我在上面省略了setupDrag, setupMinimize, setupPinListener 这三个函数的内部代码，因为它们和上一版是完全一样的。
+您在替换文件时，请将上一版content.js中的这三个函数完整地复制到新脚本的对应位置。
+
+
+
+2. style.css (样式调整)
+我们需要将之前写在popup.html里的样式，全部整合到style.css中，并加上lr-前缀以避免冲突。
+用新代码完整替换content.js和style.css。popup.html, popup.js, background.js 和 manifest.json 保持不变

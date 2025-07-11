@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Limit Ring (V2.0)",
+  "version": "2.0.0",
+  "description": "监控并可视化AI平台的使用情况，提供消息钉选功能。",
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://gemini.google.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://gemini.google.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["style.css"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Limit Ring Status"
+  }
+}

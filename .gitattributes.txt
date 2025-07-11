@@ -1,0 +1,6 @@
+# 对所有文本文件统一使用 LF 换行
+* text=auto eol=lf
+
+# Windows 执行文件或批处理保持 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
